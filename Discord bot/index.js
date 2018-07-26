@@ -245,4 +245,175 @@ bot.on("message", async message => {
 
 });
 
+bot.on("message", async message => {
+  if(message.author.bot) return;
+  if(message.channel.type === "dm") return;
+
+  let prefix = botconfig.prefix;
+  let messageArray = message.content.split(" ");
+  let cmd = messageArray[0];
+  let args = messageArray.slice(1);
+
+  if(cmd.startsWith(prefix + "veri")){
+    var member = args[0]
+    if(member == undefined) {
+      return;
+    }
+    // var member = message.author.username;
+    console.log(member);
+    message.guild.members.get(message.author.id).setNickname(member)
+    var passed = true
+    var messages = [];
+    axios.get('https://www.realmeye.com/player/' + member)
+    .then(function (response) {
+      if(response.status === 200) {
+
+        // Load in data from their realmeye
+        const html = response.data;
+        const $ = cheerio.load(html);
+
+        // To see their name (This is redudant.)
+        var playername = $('.entity-name').text(); // test
+        if(playername.toUpperCase() !== member.toUpperCase()) {
+          passed = false
+          messages.push('**Private profile on realmeye.**')
+        } else {
+          messages.push('Private profile on realmeye.')
+        }
+
+        // To see how many characters they have.
+        var playerstats = [];
+        var counts = {};
+        $('.player-stats').each(function() {
+          playerstats.push($(this).text());
+        })
+        for (var i = 0; i < playerstats.length; i++) { // Count frequencies of stats
+          var stat = playerstats[i];
+          counts[stat] = counts[stat] ? counts[stat] + 1 : 1;
+        }
+        var stat_message = "**" + member + "** has ";
+        var char_passed = false;
+        for (var key in counts) {
+          if((key == '6/8' && counts[key] >= 6) || (key == '8/8' && counts[key] >=4)) {
+            char_passed = true;
+            break;
+          }
+        }
+        if(!char_passed) {
+          passed = false
+          messages.push('**6 Characters 6/8 or 4 Characters 8/8**')
+        } else {
+          messages.push('6 Characters 6/8 or 4 Characters 8/8')
+        }
+
+        // To see how much fame they have.
+        var fameamount = $('tr').filter(function() {
+          return  $(this).children().first().text() === 'Fame';
+        }).children().last().text().replace(/ *\([^)]*\) */g, "");
+        if(fameamount < 5000) {
+          passed = false
+          messages.push("**5000 Live Fame**")
+        } else {
+          messages.push("5000 Live Fame")
+        }
+
+        // To see if their location is hidden.
+        var lastseen = $('.timeago').text();
+        if(lastseen) {
+          passed = false
+          messages.push("**Private location on realmeye**")
+        } else {
+          messages.push("Private location on realmeye")
+        }
+
+        if(passed) {
+          db.find({ username: member }, function(err, docs) {
+            var key = generator.generate({
+              length: 8,
+              numbers: true
+            })
+            var verify_obj = {
+              username: member,
+              key: key
+            }
+            if(docs === []) {
+              db.insert(verify_obj, function(err, newDoc) {
+                message.author.send('**You have successfully completed the first step of the verification.**');
+                message.author.send('The second step consists of adding the key to your realmeye bio. Once adding the key to your bio, please respond in #how-to-apply with !done');
+                message.author.send('Key: ' + '**' + key + '**');
+              })
+            } else {
+              db.remove({ username: member }, { multi: true }, function (err, numRemoved) {
+                db.insert(verify_obj, function(err, newDoc) {
+                  message.author.send("**A new key has been provided for you below:**");
+                  message.author.send('Key: ' + "**" + key + "**")
+                })
+              });
+            }
+          })
+        } else {
+          message.author.send('**You currently do not have the highlighted requirements.**')
+          for(var m in messages) {
+            message.author.send(messages[m]);
+          }
+          message.author.send('You may apply again when you have achieved the requirements above.')
+        }
+      }
+    })
+    .catch(function (error) {
+      console.log(error);
+    })
+  }
+
+  if(cmd.startsWith(prefix + "done")){
+    var member = message.author.username;
+    console.log(member + "submitted a !done");
+    db.find({ username: member }, function(err, docs) {
+      console.log(docs);
+      if(docs === undefined || docs.length == 0) {
+        message.author.send("Sorry, we could not verify you. Please try again in 15 seconds.")
+        message.author.send("If this persists, please DM a developer.")
+        return;
+      }
+      var keyvalue = docs[0].key;
+      if(!keyvalue) {
+        return;
+      }
+      axios.get('https://www.realmeye.com/player/' + member)
+      .then(function (response) {
+        if(response.status === 200) {
+
+          // Load in data from their realmeye
+          const html = response.data;
+          const $ = cheerio.load(html);
+
+          var lines = [];
+          var descriptions = $('.description-line').each(function(i, elem) {
+            lines[i] = $(this).text()
+          });
+          if(lines.includes(keyvalue)) {
+            // Now do whatever you want to do with that member. In this code snippet I give them role Crusade member.
+            let role = message.guild.roles.find("name", "Crusade member");
+            message.member.addRole(role)
+                          .then(function() {
+                            console.log(member + " has been successfully verified!")
+                            message.author.send("You have been successfully verified!!")
+                          })
+                          .catch(function (error) {
+                            console.log(error);
+                          })
+          } else {
+            console.log("Verification code not found for " + member);
+            message.author.send("Verification code not found in your realmeye")
+          }
+        }
+      })
+      .catch(function (error) {
+        console.log(error);
+      })
+
+    })
+  }
+})
+
 bot.login(botconfig.token);
