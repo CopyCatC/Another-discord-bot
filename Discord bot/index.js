@@ -5,14 +5,38 @@ const fs = require("fs");
 const bot = new Discord.Client({disableEveryone: true});
 bot.commands = new Discord.Collection();
 
-
-
+var Datastore = require('nedb')
+  , db_veri = new Datastore({ filename: 'memberKeys', autoload: true })
+  , db_susp = new Datastore({ filename: 'suspensions', autoload: true });
 
 
 bot.on("ready", async() => {
   console.log(`${bot.user.username} is online!`)
   bot.user.setActivity("with Crusade","https://www.twitch.tv/copycatc", {type: "STREAMING"});
+
+  // This is going to be running every 5 seconds in the server to see if anyone can be unbanned.
+  bot.setInterval((async () => {
+    var right_now = new Date();
+    db_susp.find({ active: true }, function (err, docs) {
+      // docs = all suspensions that are still in place.
+      for (let i of docs) {
+        if (i.end_day >= right_now) {
+          db_susp.update({ id: i._id }, { $set: { active: false } }, {}, function(err, numReplaced) {
+            if(err) return console.log(err);
+            unsuspend(client.server.members.get("name", i.user_ign))
+            console.log(member.user.username + " has been suspended");
+          })
+        }
+      }
+    })
+  }))
 });
+
+function unsuspend(member) {
+  console.log(member.user.username + " has been unsuspended");
+  const suspendrole = message.guild.roles.find("name", "Suspended")
+  member.removeRole(suspendrole).catch(console.error)
+}
 
 
 
@@ -327,7 +351,7 @@ bot.on("message", async message => {
         }
 
         if(passed) {
-          db.find({ username: member }, function(err, docs) {
+          db_veri.find({ username: member }, function(err, docs) {
             var key = generator.generate({
               length: 8,
               numbers: true
@@ -337,14 +361,14 @@ bot.on("message", async message => {
               key: key
             }
             if(docs === []) {
-              db.insert(verify_obj, function(err, newDoc) {
+              db_veri.insert(verify_obj, function(err, newDoc) {
                 message.author.send('**You have successfully completed the first step of the verification.**');
                 message.author.send('The second step consists of adding the key to your realmeye bio. Once adding the key to your bio, please respond in #how-to-apply with !done');
                 message.author.send('Key: ' + '**' + key + '**');
               })
             } else {
-              db.remove({ username: member }, { multi: true }, function (err, numRemoved) {
-                db.insert(verify_obj, function(err, newDoc) {
+              db_veri.remove({ username: member }, { multi: true }, function (err, numRemoved) {
+                db_veri.insert(verify_obj, function(err, newDoc) {
                   message.author.send("**A new key has been provided for you below:**");
                   message.author.send('Key: ' + "**" + key + "**")
                 })
@@ -368,7 +392,7 @@ bot.on("message", async message => {
   if(cmd.startsWith(prefix + "done")){
     var member = message.author.username;
     console.log(member + "submitted a !done");
-    db.find({ username: member }, function(err, docs) {
+    db_veri.find({ username: member }, function(err, docs) {
       console.log(docs);
       if(docs === undefined || docs.length == 0) {
         message.author.send("Sorry, we could not verify you. Please try again in 15 seconds.")
@@ -414,6 +438,61 @@ bot.on("message", async message => {
 
     })
   }
+
+
+  /*
+  !p1 @someone 'reason' =
+  punishment tier 1 - this code will make the @someone not connect into the HQ voice chat for 2 days (2880 minutes)
+
+  !p2 @someone 'reason' =
+  punishment tier 2 - this code will make the @someone not connect into the HQ voice chat for 1 day  (1440 minutes)
+
+  !p3 @someone 'reason' =
+  punishment tier 3 - this code will make the @someone not connect into the HQ voice chat for 0.5 days (720 minutes)
+
+  The 'reason' will be sent to the user when you do this command.
+  */
+  if(cmd.startsWith(prefix + "p")){
+    if(!message.member.roles.some(r=>["Developer", "Founder", "Moderator", "Commander"].includes(r.name)) )
+    return message.reply("Sorry, you don't have permissions to use this!");
+    var severity = messageArray[0].slice(-1);
+    var victim = message.mentions.members.first();
+    var reason = messageArray.slice(2, messageArray.length).join(" ");
+    if (victim) {
+      const member = message.guild.member(victim);
+      const suspendrole = message.guild.roles.find("name", "Suspended")
+      if(member) {
+        member.addRole(suspendrole).catch(console.error)
+        var d = new Date();
+        var doc = {
+          today: d,
+          reason: reason,
+          user_ign: member.user.username,
+          severity: severity,
+          active: true,
+        }
+        switch(severity) {
+          case "1":
+            doc[end_day] = d.setMinutes(d.getMinutes() + 720);
+            break;
+          case "2":
+            doc[end_day] = d.setMinutes(d.getMinutes() + 1440);
+            break;
+          case "3":
+            doc[end_day] = d.setMinutes(d.getMinutes() + 2880);
+            break;
+          default:
+            message.channel.send("Invalid severity number. Only use 1-3.")
+            break;
+        }
+        console.log(doc);
+        db_susp.insert(doc, function(err) {
+          console.log(member.user.username + " has been suspended");
+        })
+      }
+    }
+  }
+
 })
 
 bot.login(botconfig.token);
